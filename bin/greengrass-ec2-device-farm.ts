@@ -4,9 +4,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as cdk from 'aws-cdk-lib';
+import { Aspects } from 'aws-cdk-lib';
 import { GreengrassEC2DeviceFarmStack } from '../lib/greengrass-ec2-device-farm-stack';
 import { AwsSolutionsChecks } from 'cdk-nag'
-import { Aspects } from 'aws-cdk-lib';
 
 const app = new cdk.App();
 
