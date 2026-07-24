@@ -15,8 +15,8 @@ test('Good stack', () => {
     template.resourceCountIs('AWS::EC2::VPC', 1);
     template.resourceCountIs('AWS::EC2::KeyPair', 1);
     template.resourceCountIs('AWS::EC2::SecurityGroup', 2);
-    template.resourceCountIs('AWS::IAM::Role', 2);
-    template.resourceCountIs('AWS::IAM::Policy', 1);
+    template.resourceCountIs('AWS::IAM::Role', 4);
+    template.resourceCountIs('AWS::IAM::Policy', 3);
     template.resourceCountIs('AWS::IAM::ManagedPolicy', 1);
     template.resourceCountIs('AWS::EC2::Instance', 5);
 });

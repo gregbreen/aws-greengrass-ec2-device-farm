@@ -5,6 +5,9 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as cr from 'aws-cdk-lib/custom-resources';
+import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { NagSuppressions } from 'cdk-nag'
 
 export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
@@ -52,6 +55,82 @@ export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
       value: `aws ssm get-parameter --name /ec2/keypair/${this.keyPair.keyPairId} --with-decryption --query Parameter.Value --output text > ${this.keyPair.keyPairName}.pem && chmod 400 ${this.keyPair.keyPairName}.pem`
     });
     new cdk.CfnOutput(this, 'Greengrass Core Device Role', { value: this.greengrassRole.roleName });
+
+    // Custom Resource to clean up IoT resources on stack deletion
+    this.createCleanupResource();
+  }
+
+  private createCleanupResource(): void {
+    const cleanupFn = new NodejsFunction(this, `${this.stackName}CleanupFunction`, {
+      entry: 'lambda/clean-iot-handler.ts',
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_LATEST,
+      timeout: cdk.Duration.minutes(15),
+      description: 'Cleans up IoT/Greengrass resources on stack deletion',
+    });
+
+    cleanupFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'iot:ListPolicies',
+        'iot:ListTargetsForPolicy',
+        'iot:DetachPolicy',
+        'iot:DeletePolicy',
+        'iot:DescribeThingGroup',
+        'iot:ListThingPrincipals',
+        'iot:DetachThingPrincipal',
+        'iot:UpdateCertificate',
+        'iot:DeleteCertificate',
+        'iot:DeleteThing',
+        'iot:DeleteThingGroup',
+        'iot:ListRoleAliases',
+        'iot:DeleteRoleAlias',
+        'iot:CancelJob',
+        'iot:DeleteJob',
+        'iot:DescribeJob',
+        'greengrass:ListCoreDevices',
+        'greengrass:DeleteCoreDevice',
+        'greengrass:ListDeployments',
+        'greengrass:CancelDeployment',
+        'greengrass:DeleteDeployment',
+      ],
+      resources: ['*'],
+    }));
+
+    NagSuppressions.addResourceSuppressions(cleanupFn, [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: 'Lambda basic execution role is required for CloudWatch Logs.'
+      }
+    ], true)
+
+    NagSuppressions.addResourceSuppressions(cleanupFn, [
+      {
+        id: 'AwsSolutions-IAM5',
+        reason: 'IoT and Greengrass cleanup requires broad resource access to find and delete provisioned resources.'
+      }
+    ], true)
+
+    const provider = new cr.Provider(this, `${this.stackName}CleanupProvider`, {
+      onEventHandler: cleanupFn,
+    });
+
+    NagSuppressions.addResourceSuppressions(provider, [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: 'Custom resource provider framework uses managed policies.'
+      },
+      {
+        id: 'AwsSolutions-IAM5',
+        reason: 'Custom resource provider framework requires broad permissions.'
+      }
+    ], true)
+
+    new cdk.CustomResource(this, `${this.stackName}CleanupResource`, {
+      serviceToken: provider.serviceToken,
+      properties: {
+        FarmName: this.stackName,
+      },
+    });
   }
 
   private createVpc(): ec2.Vpc {
