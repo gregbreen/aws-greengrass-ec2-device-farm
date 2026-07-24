@@ -56,21 +56,31 @@ export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, 'Greengrass Core Device Role', { value: this.greengrassRole.roleName });
 
-    // Custom Resource to clean up IoT resources on stack deletion
-    this.createCleanupResource();
+    // Custom Resource to manage IoT/Greengrass lifecycle (create deployment, clean up on delete)
+    this.createLifecycleResource();
   }
 
-  private createCleanupResource(): void {
-    const cleanupFn = new NodejsFunction(this, `${this.stackName}CleanupFunction`, {
-      entry: 'lambda/clean-iot-handler.ts',
+  private createLifecycleResource(): void {
+    const lifecycleFn = new NodejsFunction(this, `${this.stackName}LifecycleFunction`, {
+      entry: 'lambda/lifecycle-handler.ts',
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_LATEST,
       timeout: cdk.Duration.minutes(15),
-      description: 'Cleans up IoT/Greengrass resources on stack deletion',
+      description: 'Manages IoT/Greengrass resource lifecycle on stack create and delete',
+      bundling: {
+        externalModules: ['@aws-sdk/*'],
+      },
     });
 
-    cleanupFn.addToRolePolicy(new iam.PolicyStatement({
+    lifecycleFn.addToRolePolicy(new iam.PolicyStatement({
       actions: [
+        // Create actions
+        'iot:CreateThingGroup',
+        'iot:CreateJob',
+        'greengrass:CreateDeployment',
+        'greengrass:ListComponentVersions',
+        'greengrass:ListCoreDevices',
+        // Delete actions
         'iot:ListPolicies',
         'iot:ListTargetsForPolicy',
         'iot:DetachPolicy',
@@ -87,7 +97,6 @@ export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
         'iot:CancelJob',
         'iot:DeleteJob',
         'iot:DescribeJob',
-        'greengrass:ListCoreDevices',
         'greengrass:DeleteCoreDevice',
         'greengrass:ListDeployments',
         'greengrass:CancelDeployment',
@@ -96,22 +105,27 @@ export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
       resources: ['*'],
     }));
 
-    NagSuppressions.addResourceSuppressions(cleanupFn, [
+    NagSuppressions.addResourceSuppressions(lifecycleFn, [
       {
         id: 'AwsSolutions-IAM4',
         reason: 'Lambda basic execution role is required for CloudWatch Logs.'
       }
     ], true)
 
-    NagSuppressions.addResourceSuppressions(cleanupFn, [
+    NagSuppressions.addResourceSuppressions(lifecycleFn, [
       {
         id: 'AwsSolutions-IAM5',
-        reason: 'IoT and Greengrass cleanup requires broad resource access to find and delete provisioned resources.'
+        reason: 'IoT and Greengrass lifecycle management requires broad resource access.'
       }
     ], true)
 
-    const provider = new cr.Provider(this, `${this.stackName}CleanupProvider`, {
-      onEventHandler: cleanupFn,
+    cdk.Annotations.of(this).acknowledgeWarning(
+      '@aws-cdk/aws-lambda-nodejs:variableRuntimeExternals',
+      'Only @aws-sdk/* is externalized, which is guaranteed to be available in all Node.js Lambda runtimes.'
+    );
+
+    const provider = new cr.Provider(this, `${this.stackName}LifecycleProvider`, {
+      onEventHandler: lifecycleFn,
     });
 
     NagSuppressions.addResourceSuppressions(provider, [
@@ -125,10 +139,14 @@ export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
       }
     ], true)
 
-    new cdk.CustomResource(this, `${this.stackName}CleanupResource`, {
+    new cdk.CustomResource(this, `${this.stackName}LifecycleResource`, {
       serviceToken: provider.serviceToken,
       properties: {
         FarmName: this.stackName,
+        NucleusConfig: JSON.stringify({
+          interpolateComponentConfiguration: 'true',
+          greengrassDataPlaneEndpoint: 'iotdata',
+        }),
       },
     });
   }
@@ -403,7 +421,7 @@ java -Droot="C:\\greengrass\\v2" "-Dlog.store=FILE"`;
 --aws-region ${this.region} --thing-name ${instanceName} --thing-group-name ${this.stackName} \
 --thing-policy-name ${this.stackName} --tes-role-name ${this.greengrassRole.roleName} \
 --tes-role-alias-name ${this.greengrassRole.roleName}Alias \
---provision true --setup-system-service true --deploy-dev-tools true`;
+--provision true --setup-system-service true`;
     const ggCodaLinux = '--component-default-user ggc_user:ggc_group';
     const ggCodaWindows = '--component-default-user ggc_user';
     const dockerInstallAmazonLinux = `\

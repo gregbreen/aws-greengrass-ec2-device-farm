@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { IoTClient, ListPoliciesCommand, ListTargetsForPolicyCommand, DetachPolicyCommand,
-  DeletePolicyCommand, DescribeThingGroupCommand, ListThingPrincipalsCommand, DetachThingPrincipalCommand,
-  UpdateCertificateCommand, DeleteCertificateCommand, DeleteThingCommand, DeleteThingGroupCommand,
-  ListRoleAliasesCommand, DeleteRoleAliasCommand } from '@aws-sdk/client-iot';
+  DeletePolicyCommand, CreateThingGroupCommand, DescribeThingGroupCommand, ListThingPrincipalsCommand,
+  DetachThingPrincipalCommand, UpdateCertificateCommand, DeleteCertificateCommand, DeleteThingCommand,
+  DeleteThingGroupCommand, ListRoleAliasesCommand, DeleteRoleAliasCommand } from '@aws-sdk/client-iot';
 import { GreengrassV2Client, ListCoreDevicesCommand, DeleteCoreDeviceCommand,
-  ListDeploymentsCommand, CancelDeploymentCommand, DeleteDeploymentCommand } from '@aws-sdk/client-greengrassv2';
+  ListDeploymentsCommand, CancelDeploymentCommand, DeleteDeploymentCommand,
+  CreateDeploymentCommand } from '@aws-sdk/client-greengrassv2';
 
 const iot = new IoTClient();
 const greengrassv2 = new GreengrassV2Client();
@@ -162,42 +163,90 @@ async function deleteDeployments(thingGroupArn: string): Promise<void> {
   }
 }
 
+async function createThingGroupAndDeployment(farmName: string, nucleusConfig: string): Promise<string> {
+  console.log(`Creating thing group ${farmName}`);
+  const thingGroupResponse = await iot.send(new CreateThingGroupCommand({
+    thingGroupName: farmName,
+  }));
+  const thingGroupArn = thingGroupResponse.thingGroupArn!;
+
+  // Look up the latest Nucleus version (CLI uses the same version)
+  const region = process.env.AWS_REGION;
+  const { ListComponentVersionsCommand } = await import('@aws-sdk/client-greengrassv2');
+
+  const nucleusArn = `arn:aws:greengrass:${region}:aws:components:aws.greengrass.Nucleus`;
+  const nucleusVersions = await greengrassv2.send(new ListComponentVersionsCommand({ arn: nucleusArn }));
+  const nucleusVersion = nucleusVersions.componentVersions![0].componentVersion!;
+  console.log(`Latest Nucleus version: ${nucleusVersion}`);
+
+  console.log(`Creating Greengrass deployment for ${farmName}`);
+  const deploymentResponse = await greengrassv2.send(new CreateDeploymentCommand({
+    targetArn: thingGroupArn,
+    deploymentName: `Deployment for ${farmName}`,
+    components: {
+      'aws.greengrass.Nucleus': {
+        componentVersion: nucleusVersion,
+        configurationUpdate: {
+          merge: nucleusConfig,
+        },
+      },
+      'aws.greengrass.Cli': {
+        componentVersion: nucleusVersion,
+      },
+    },
+  }));
+  console.log(`Created deployment ${deploymentResponse.deploymentId}`);
+
+  return thingGroupArn;
+}
+
 export async function handler(event: any): Promise<any> {
   console.log('Event:', JSON.stringify(event));
 
   const requestType = event.RequestType;
   const farmName = event.ResourceProperties.FarmName;
+  const nucleusConfig = event.ResourceProperties.NucleusConfig;
 
-  // Only run cleanup on Delete
-  if (requestType !== 'Delete') {
-    console.log(`RequestType is ${requestType}, nothing to do.`);
+  if (requestType === 'Create') {
+    console.log(`Creating IoT resources for ${farmName}`);
+    const thingGroupArn = await createThingGroupAndDeployment(farmName, nucleusConfig);
+    console.log('Create complete.');
+    return { PhysicalResourceId: farmName, Data: { ThingGroupArn: thingGroupArn } };
+  }
+
+  if (requestType === 'Update') {
+    console.log(`Update requested for ${farmName}, nothing to do.`);
     return { PhysicalResourceId: farmName };
   }
 
-  console.log(`Cleaning up IoT resources for ${farmName}`);
+  if (requestType === 'Delete') {
+    console.log(`Cleaning up IoT resources for ${farmName}`);
 
-  // Get the thing group ARN
-  let thingGroupArn: string;
-  try {
-    const response = await iot.send(new DescribeThingGroupCommand({ thingGroupName: farmName }));
-    thingGroupArn = response.thingGroupArn!;
-  } catch (e: any) {
-    if (e.name === 'ResourceNotFoundException') {
-      console.log(`Thing group ${farmName} not found. Constructing ARN.`);
-      const region = process.env.AWS_REGION;
-      const accountId = event.ServiceToken.split(':')[4];
-      thingGroupArn = `arn:aws:iot:${region}:${accountId}:thinggroup/${farmName}`;
-    } else {
-      throw e;
+    // Get the thing group ARN
+    let thingGroupArn: string;
+    try {
+      const response = await iot.send(new DescribeThingGroupCommand({ thingGroupName: farmName }));
+      thingGroupArn = response.thingGroupArn!;
+    } catch (e: any) {
+      if (e.name === 'ResourceNotFoundException') {
+        console.log(`Thing group ${farmName} not found. Constructing ARN.`);
+        const region = process.env.AWS_REGION;
+        const accountId = event.ServiceToken.split(':')[4];
+        thingGroupArn = `arn:aws:iot:${region}:${accountId}:thinggroup/${farmName}`;
+      } else {
+        throw e;
+      }
     }
+
+    await deletePolicies(farmName);
+    await deleteCoreDevices(farmName, thingGroupArn);
+    await deleteThingGroup(farmName);
+    await deleteRoleAliases(farmName);
+    await deleteDeployments(thingGroupArn);
+
+    console.log('Clean-up complete.');
+    return { PhysicalResourceId: farmName };
   }
 
-  await deletePolicies(farmName);
-  await deleteCoreDevices(farmName, thingGroupArn);
-  await deleteThingGroup(farmName);
-  await deleteRoleAliases(farmName);
-  await deleteDeployments(thingGroupArn);
-
-  console.log('Clean-up complete.');
   return { PhysicalResourceId: farmName };
 }
