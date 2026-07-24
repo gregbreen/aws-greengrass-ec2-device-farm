@@ -144,7 +144,7 @@ The Greengrass automatic provisioning creates the following resources:
 * Two AWS IoT thing policies: **GreengrassEC2DeviceFarm** and **GreengrassTESCertificatePolicyGreengrassEC2DeviceFarmTokenExchangeRoleAlias**.
 * A Greengrass token exchange role alias named **GreengrassEC2DeviceFarmTokenExchangeRoleAlias**.
 
-As these are not created by the CDK application, the `cdk destroy` operation does not delete them. The `clean_iot.py` script is provided to remove these resources after the CDK application has been destroyed.
+These resources are created at runtime by the Greengrass installer (not by CloudFormation). A Lambda-backed Custom Resource is included in the stack that automatically cleans up these resources when you run `cdk destroy`.
 
 # Troubleshooting
 
