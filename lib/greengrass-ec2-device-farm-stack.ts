@@ -34,24 +34,18 @@ export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
     // All instances use the same EC2 role. It grants permissions for the Greengrass installer.
     this.instanceRole = this.createInstanceRole();
 
-    const ami_windows_server_2022 = ec2.MachineImage.latestWindows(ec2.WindowsVersion.WINDOWS_SERVER_2022_ENGLISH_CORE_BASE);
-    const ami_windows_server_2019 = ec2.MachineImage.latestWindows(ec2.WindowsVersion.WINDOWS_SERVER_2019_ENGLISH_CORE_BASE);
+    const ami_windows_server_2025 = ec2.MachineImage.latestWindows(ec2.WindowsVersion.WINDOWS_SERVER_2025_ENGLISH_CORE_BASE);
     const ami_al2023_x86_64 = this.getAmazonLinuxAmi(ec2.AmazonLinuxCpuType.X86_64);
     const ami_al2023_arm_64 = this.getAmazonLinuxAmi(ec2.AmazonLinuxCpuType.ARM_64);
-    const ami_ubuntu_2204_x86_64 = this.getUbuntuAmi('22.04', 'amd64');
-    const ami_ubuntu_2204_arm_64 = this.getUbuntuAmi('22.04', 'arm64');
-    const ami_ubuntu_2004_x86_64 = this.getUbuntuAmi('20.04', 'amd64');
-    const ami_ubuntu_2004_arm_64 = this.getUbuntuAmi('20.04', 'arm64');
+    const ami_ubuntu_pro_2604_x86_64 = this.getUbuntuProAmi('26.04', 'amd64');
+    const ami_ubuntu_pro_2604_arm_64 = this.getUbuntuProAmi('26.04', 'arm64');
 
     // Windows first because it's slowest to come up
-    this.createInstance('windows-server-2022', ami_windows_server_2022);
-    this.createInstance('windows-server-2019', ami_windows_server_2019);
+    this.createInstance('windows-server-2025', ami_windows_server_2025);
     this.createInstance('al2023-x86-64', ami_al2023_x86_64);
     this.createInstance('al2023-arm-64', ami_al2023_arm_64);
-    this.createInstance('ubuntu-22-04-x86-64', ami_ubuntu_2204_x86_64);
-    this.createInstance('ubuntu-22-04-arm-64', ami_ubuntu_2204_arm_64);
-    this.createInstance('ubuntu-20-04-x86-64', ami_ubuntu_2004_x86_64);
-    this.createInstance('ubuntu-20-04-arm-64', ami_ubuntu_2004_arm_64);
+    this.createInstance('ubuntu-26-04-x86-64', ami_ubuntu_pro_2604_x86_64);
+    this.createInstance('ubuntu-26-04-arm-64', ami_ubuntu_pro_2604_arm_64);
 
     new cdk.CfnOutput(this, 'Key Pair Name', { value: this.keyPair.keyPairName });
     new cdk.CfnOutput(this, 'Download Key Command', {
@@ -78,6 +72,12 @@ export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
         reason: 'VPC flow logs would add to costs for these non-critical resources.'
       }
     ])
+
+    // Exclude this VPC from VPC Block Public Access so instances can reach the internet
+    new ec2.CfnVPCBlockPublicAccessExclusion(this, `${this.stackName}BpaExclusion`, {
+      internetGatewayExclusionMode: 'allow-bidirectional',
+      vpcId: vpc.vpcId,
+    });
 
     return vpc;
   }
@@ -232,9 +232,9 @@ export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
     });
   }
 
-  private getUbuntuAmi(release: string, arch: string): ec2.IMachineImage {
+  private getUbuntuProAmi(release: string, arch: string): ec2.IMachineImage {
     return ec2.MachineImage.fromSsmParameter(
-      `/aws/service/canonical/ubuntu/server/${release}/stable/current/${arch}/hvm/ebs-gp2/ami-id`, {
+      `/aws/service/canonical/ubuntu/pro-server/${release}/stable/current/${arch}/hvm/ebs-gp3/ami-id`, {
         os: ec2.OperatingSystemType.LINUX
       }
     );
@@ -242,7 +242,7 @@ export class GreengrassEC2DeviceFarmStack extends cdk.Stack {
 
   private createInstance(name: string, ami: ec2.IMachineImage) {
     const instanceType = name.includes('arm') ? ec2.InstanceClass.T4G : ec2.InstanceClass.T3;
-    const instanceSize = ec2.InstanceSize.SMALL;
+    const instanceSize = name.includes('windows') ? ec2.InstanceSize.MEDIUM : ec2.InstanceSize.SMALL;
     const securityGroup = name.includes('windows') ? this.windowsSecurityGroup : this.linuxSecurityGroup;
     // Set volume sizes and root device names that match the AMI defaults
     const volumeSize = name.includes('windows') ? 30 : 8;
@@ -291,7 +291,11 @@ echo "root ALL=(ALL:ALL) ALL" > /etc/sudoers.d/gg-root-runas-all`;
     const baseInstallUbuntu = `\
 #!/bin/bash
 apt update
-apt install -y default-jre unzip python3-pip python3-venv`;
+apt install -y default-jre unzip python3-pip python3-venv
+# Ubuntu 26.04+ ships sudo-rs which does not support the -E flag used by Greengrass nucleus.
+# Install and switch to the classic sudo implementation.
+apt install -y sudo.ws
+update-alternatives --set sudo /usr/bin/sudo.ws`;
     const baseInstallWindows = `\
 <powershell>
 cd ~

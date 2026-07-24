@@ -18,5 +18,5 @@ test('Good stack', () => {
     template.resourceCountIs('AWS::IAM::Role', 2);
     template.resourceCountIs('AWS::IAM::Policy', 1);
     template.resourceCountIs('AWS::IAM::ManagedPolicy', 1);
-    template.resourceCountIs('AWS::EC2::Instance', 8);
+    template.resourceCountIs('AWS::EC2::Instance', 5);
 });

@@ -10,12 +10,9 @@ The fleet of instances deployed is as follows.
 | ----------------------- | --------------- | --------- |
 | Amazon Linux 2023       | x86_64  (amd64) | t3.small  |
 | Amazon Linux 2023       | aarch64 (arm64) | t4g.small |
-| Ubuntu Server 22.04 LTS | x86_64  (amd64) | t3.small  |
-| Ubuntu Server 22.04 LTS | aarch64 (arm64) | t4g.small |
-| Ubuntu Server 20.04 LTS | x86_64  (amd64) | t3.small  |
-| Ubuntu Server 20.04 LTS | aarch64 (arm64) | t4g.small |
-| Windows Server 2022     | x86_64  (amd64) | t3.small  |
-| Windows Server 2019     | x86_64  (amd64) | t3.small  |
+| Ubuntu Pro 26.04 LTS    | x86_64  (amd64) | t3.small  |
+| Ubuntu Pro 26.04 LTS    | aarch64 (arm64) | t4g.small |
+| Windows Server 2025     | x86_64  (amd64) | t3.medium |
 
 For each instance, Greengrass is [installed with automatic provisioning](https://docs.aws.amazon.com/greengrass/v2/developerguide/quick-installation.html) via instance user data. 
 
@@ -130,6 +127,10 @@ It may also be necessary to add to or adjust the policies attached to the **Gree
 ## Security Groups
 
 The application creates a security group named **GreengrassEC2DeviceFarmLinuxSG** for the Linux instances and **GreengrassEC2DeviceFarmWindowsSG** for the Windows instances. If you install a component that requires particular open ports, you should open the appropriate inbound ports in these security groups.
+
+## VPC Block Public Access
+
+The stack includes a [VPC Block Public Access](https://docs.aws.amazon.com/vpc/latest/userguide/security-vpc-bpa.html) (BPA) exclusion so that instances can reach the internet even if account-level BPA is enabled.
 
 # Clean-up
 
