@@ -98,6 +98,15 @@ cdk destroy
 
 The application creates an AWS IoT static thing group named **GreengrassEC2DeviceFarm** and a Greengrass deployment named **Deployment for GreengrassEC2DeviceFarm**. You can add your components to this deployment to test them across the range of operating systems and architectures supported by the fleet.
 
+## Nucleus Configuration
+
+Each core device is initialized with the following Greengrass nucleus configuration:
+
+| Parameter | Value | Purpose |
+| --------- | ----- | ------- |
+| `interpolateComponentConfiguration` | `true` | Enables [recipe variable interpolation](https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-component-configuration.html) in component configurations |
+| `greengrassDataPlaneEndpoint` | `iotdata` | Uses the IoT data endpoint for the Greengrass data plane |
+
 ## Core Device Role
 
 The application creates a Greengrass core device IAM role named **GreengrassEC2DeviceFarmTokenExchangeRole** with attached IAM policy **GreengrassEC2DeviceFarmTokenExchangeRoleAccess**. All instances use this role through a role alias named **GreengrassEC2DeviceFarmTokenExchangeRoleAlias**. 
